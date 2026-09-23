@@ -18,7 +18,9 @@ import math
 import os
 import time
 
-SECRET_KEY = os.environ.get("AGNIMARG_SIGNING_KEY", "demo-only-not-for-production-use").encode()
+_DEFAULT_SIGNING_KEY = "demo-only-not-for-production-use"
+SECRET_KEY = os.environ.get("AGNIMARG_SIGNING_KEY", _DEFAULT_SIGNING_KEY).encode()
+USING_DEFAULT_SIGNING_KEY = SECRET_KEY == _DEFAULT_SIGNING_KEY.encode()
 
 EARTH_RADIUS_KM = 6371.0
 HORIZONS_HOURS = [1, 3, 6]

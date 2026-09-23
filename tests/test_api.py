@@ -12,6 +12,22 @@ def client():
     return TestClient(main.app)
 
 
+def test_health(client):
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert data["graph_nodes"] > 0
+    assert data["graph_edges"] > 0
+
+
+def test_get_weather_scenario_mode(client):
+    r = client.get("/api/weather?mode=scenario")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["source"].startswith("seeded fire-season scenario")
+
+
 def test_get_state(client):
     r = client.get("/api/state")
     assert r.status_code == 200

@@ -26,6 +26,8 @@ Hardware/sensor track: dropped (budget, per your instruction). Full XGBoost/Conv
 
 Per the original audit doc's Tier-1 findings — HMAC signing (finding #1) and the human-approval gate (finding #2) are the two cheapest-to-build, highest-impact controls, so they're real and demoable, not just described. Role comes from a server-verified signed session token (`backend/auth.py`), not a client-asserted field — an earlier version of this build trusted whatever role the client claimed in the request body, which meant anyone could call the API directly and skip the login UI; that gap is now closed and covered by a regression test (`tests/test_api.py::test_dispatch_approve_rejects_forged_role_in_body`). Password hashing (SHA-256) and demo credentials are intentionally minimal/public — matches the Prototype Plan's own "Authentication: Yes (basic)" bar, not a production auth system.
 
+Also covers, cheaply: rate limiting (`backend/ratelimit.py`, Tier-2 requirement — stricter on `/api/login` to slow brute-forcing the weak demo passwords), dependency scanning (`.github/dependabot.yml`, Tier-3 finding — weekly automated PRs for pip + Actions), and a loud startup warning (not a silent fallback) if the HMAC signing key or auth secret is left at its public demo default (`backend/main.py`).
+
 ## Repo layout (built)
 
 ```
@@ -48,7 +50,8 @@ Per the original audit doc's Tier-1 findings — HMAC signing (finding #1) and t
   fetch_data.py     Regenerates road_graph.json/places.json from live Overpass API
   seed_hotspots.py  Regenerates hotspots.json (seeded fire event + fire-season scenario weather)
 /tests
-  33 pytest cases covering sentinel/exodus/auth/firms logic + the full HTTP API
+  47 pytest cases covering sentinel/exodus/auth/firms/graph_data/weather/
+  ratelimit logic + the full HTTP API
 ```
 
 ## Run it
