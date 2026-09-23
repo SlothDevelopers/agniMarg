@@ -27,6 +27,7 @@ import audit
 import auth
 import exodus
 import graph_data
+import intake
 import sentinel
 import weather as weather_mod
 from ratelimit import RateLimitMiddleware
@@ -134,7 +135,13 @@ def simulate(mode: Literal["scenario", "live"] = "scenario"):
         centroid_lon = sum(h["lon"] for h in _EVENT["hotspots"]) / len(_EVENT["hotspots"])
         active_weather = weather_mod.fetch_live_weather(centroid_lat, centroid_lon)
 
-    signed = sentinel.build_signed_threat_payload(_EVENT["hotspots"], active_weather)
+    corroboration = intake.corroborate(_EVENT["hotspots"])
+    audit.record("hotspots_corroborated", actor="INTAKE", details={
+        "confirmed": len(corroboration["confirmed"]), "unconfirmed": len(corroboration["unconfirmed"]),
+        "cluster_count": corroboration["cluster_count"],
+    })
+
+    signed = sentinel.build_signed_threat_payload(corroboration["confirmed"], active_weather)
     audit.record("threat_cone_generated", actor="SENTINEL", details={
         "risk_score": signed["payload"]["risk_score"], "signature": signed["signature"][:16] + "...",
     })
@@ -162,6 +169,8 @@ def simulate(mode: Literal["scenario", "live"] = "scenario"):
         "safe_route": result["safe_route"],
         "blocked_edge_count": result["blocked_edge_count"],
         "rerouted": result["rerouted"],
+        "confirmed_hotspot_count": len(corroboration["confirmed"]),
+        "unconfirmed_hotspots": corroboration["unconfirmed"],
     }
 
 

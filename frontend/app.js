@@ -168,9 +168,13 @@ async function runSimulation(mode) {
       "weatherReadout",
       `Weather (${w.source}):\ntemp ${w.temperature_c}°C, humidity ${w.humidity_pct}%, wind ${w.wind_speed_kmh} km/h @ ${w.wind_direction_deg}°`
     );
+    const corroborationNote =
+      data.unconfirmed_hotspots.length > 0
+        ? `\n⚠️ ${data.unconfirmed_hotspots.length} report(s) excluded — no corroborating second source (single-point reports aren't trusted alone).`
+        : `\nAll ${data.confirmed_hotspot_count} hotspot report(s) corroborated by a nearby second source.`;
     setText(
       "riskReadout",
-      `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)`
+      `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)${corroborationNote}`
     );
     setText(
       "routeReadout",

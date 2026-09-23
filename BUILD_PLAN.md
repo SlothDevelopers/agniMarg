@@ -17,7 +17,7 @@ Hardware/sensor track: dropped (budget, per your instruction). Full XGBoost/Conv
 
 | Part | Tonight's build | Explicitly deferred (roadmap only) |
 |---|---|---|
-| INTAKE | Real OSM road network (Overpass API) + real place/hospital data for Nainital, Uttarakhand. Live Open-Meteo weather (no API key). Seeded historical-style fire event (Pangot/Kilbary forest belt) by default — **or live NASA FIRMS hotspots if you set `AGNIMARG_FIRMS_MAP_KEY`** (see `backend/firms.py`), with automatic fallback to seeded data if the key is missing or the request fails. | PostGIS, Airflow/Celery ingestion, multi-source corroboration |
+| INTAKE | Real OSM road network (Overpass API) + real place/hospital data for Nainital, Uttarakhand. Live Open-Meteo weather (no API key). Seeded historical-style fire event (Pangot/Kilbary forest belt) by default — **or live NASA FIRMS hotspots if you set `AGNIMARG_FIRMS_MAP_KEY`** (see `backend/firms.py`), with automatic fallback to seeded data if the key is missing or the request fails. Multi-source corroboration (`backend/intake.py`): hotspots are clustered (distance-based, mirrors the master blueprint's DBSCAN eps=1km/min_samples=2 spec) and only clusters of 2+ corroborating points feed SENTINEL — an isolated single-point report is flagged, not trusted. | PostGIS, Airflow/Celery ingestion |
 | SENTINEL | FWI-style heuristic risk score (temp + humidity + wind — real live/scenario weather in, real number out) driving a real downwind threat-cone geometry (1h/3h/6h rings). HMAC-SHA256 signs every payload. | XGBoost ignition model, CNN-BiLSTM/ConvLSTM spread, MLflow versioning |
 | EXODUS | Real NetworkX Dijkstra routing over the real OSM graph. Verifies the HMAC signature before acting — rejects tampered payloads live (demoed, not just claimed). Dynamically re-costs/blocks edges inside the threat cone and reroutes. | OSRM/GraphHopper, multi-modal transit, OR-based vehicle pre-positioning |
 | INTERFACE | Single-page Leaflet dashboard: live map, cones, before/after routes, real username/password login with signed session tokens (`backend/auth.py`), human-approval dispatch gate, SQLite-persisted audit log. | Real OAuth2/OIDC (Google/etc.), real SMS (MSG91), Supabase/Postgres |
@@ -38,6 +38,8 @@ Also covers, cheaply: rate limiting (`backend/ratelimit.py`, Tier-2 requirement 
   graph_data.py    Loads the OSM graph + seeded/live event data
   weather.py       Live Open-Meteo fetch (fails soft to a labeled fallback if offline)
   firms.py         Optional live NASA FIRMS hotspot pull (AGNIMARG_FIRMS_MAP_KEY)
+  intake.py        Multi-source corroboration (distance clustering, flags isolated reports)
+  ratelimit.py     Per-IP rate limiting middleware (stricter on /api/login)
   sentinel.py      Risk score + threat-cone geometry + HMAC sign/verify
   exodus.py        Point-in-polygon re-costing, Dijkstra routing, signature verification
   auth.py          Username/password login + signed session tokens (real, intentionally minimal)
@@ -50,8 +52,8 @@ Also covers, cheaply: rate limiting (`backend/ratelimit.py`, Tier-2 requirement 
   fetch_data.py     Regenerates road_graph.json/places.json from live Overpass API
   seed_hotspots.py  Regenerates hotspots.json (seeded fire event + fire-season scenario weather)
 /tests
-  47 pytest cases covering sentinel/exodus/auth/firms/graph_data/weather/
-  ratelimit logic + the full HTTP API
+  54 pytest cases covering sentinel/exodus/auth/firms/graph_data/weather/
+  ratelimit/intake logic + the full HTTP API
 ```
 
 ## Run it
