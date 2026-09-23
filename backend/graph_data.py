@@ -6,6 +6,8 @@ import os
 
 import networkx as nx
 
+import firms
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 BASE_SPEED_KMH = {
@@ -13,6 +15,7 @@ BASE_SPEED_KMH = {
     "unclassified": 25, "residential": 20, "service": 15, "track": 15,
 }
 DEFAULT_SPEED_KMH = 25
+SOURCE_BBOX_NOTE = "VIIRS_SNPP_NRT, Nainital/Uttarakhand bbox"
 
 
 def _edge_time_min(distance_km: float, highway: str) -> float:
@@ -49,8 +52,30 @@ def nearest_node(g: nx.Graph, lat: float, lon: float) -> int:
 
 
 def load_hotspot_event() -> dict:
+    """Returns the seeded demo event by default. If AGNIMARG_FIRMS_MAP_KEY is
+    set, tries a live FIRMS pull over the same bbox first and, if it returns
+    any hotspots, swaps them in — village/shelter and the fire-season scenario
+    weather stay from the seeded file either way, since those are fixed demo-
+    region facts, not something FIRMS provides."""
     with open(os.path.join(DATA_DIR, "hotspots.json"), encoding="utf-8") as f:
-        return json.load(f)
+        seeded = json.load(f)
+
+    with open(os.path.join(DATA_DIR, "road_graph.json"), encoding="utf-8") as f:
+        south, west, north, east = json.load(f)["bbox"]
+
+    try:
+        live = firms.fetch_live_hotspots(south, west, north, east)
+    except Exception:
+        live = None  # a configured-but-failing key shouldn't crash the demo
+
+    if live:
+        seeded = {
+            **seeded,
+            "label": "LIVE NASA FIRMS FEED",
+            "note": f"Live active-fire hotspots from NASA FIRMS ({SOURCE_BBOX_NOTE}).",
+            "hotspots": live,
+        }
+    return seeded
 
 
 def load_places() -> list:
