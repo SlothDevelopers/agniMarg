@@ -101,11 +101,44 @@ function setText(id, text) {
   document.getElementById(id).textContent = text;
 }
 
+/** Fetch wrapper that turns network failures (server down, no connection,
+ * CORS, etc.) into a consistent {ok: false, networkError: true, message}
+ * shape instead of throwing — callers no longer need their own try/catch. */
+async function apiFetch(path, options) {
+  try {
+    const res = await fetch(`${API}${path}`, options);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      // non-JSON body (e.g. an unexpected 500 with an HTML error page) — data stays null
+    }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, networkError: true, message: `Could not reach the server: ${e.message}` };
+  }
+}
+
+/** Disables the given button IDs for the duration of `fn`, restoring their
+ * previous disabled state afterward (rather than force-enabling buttons that
+ * were legitimately disabled for another reason, e.g. tamper/approve before
+ * the first simulation has ever run). */
+async function withButtonsDisabled(ids, fn) {
+  const buttons = ids.map((id) => document.getElementById(id));
+  const prevDisabled = buttons.map((b) => b.disabled);
+  buttons.forEach((b) => (b.disabled = true));
+  try {
+    return await fn();
+  } finally {
+    buttons.forEach((b, i) => (b.disabled = prevDisabled[i]));
+  }
+}
+
 async function loadAuditLog() {
-  const res = await fetch(`${API}/audit-log`);
-  const { entries } = await res.json();
+  const result = await apiFetch("/audit-log");
+  if (!result.ok) return; // non-critical panel — fail silently rather than blocking the main flow
   const el = document.getElementById("auditLog");
-  el.innerHTML = entries
+  el.innerHTML = result.data.entries
     .slice()
     .reverse()
     .map(
@@ -116,76 +149,100 @@ async function loadAuditLog() {
 }
 
 async function runSimulation(mode) {
-  setText("weatherReadout", "Running simulation…");
-  const res = await fetch(`${API}/simulate?mode=${mode}`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json();
-    setText("weatherReadout", `Error: ${err.detail}`);
-    return;
-  }
-  const data = await res.json();
-  lastCones = data.cones_by_hotspot;
+  await withButtonsDisabled(["btnSimScenario", "btnSimLive"], async () => {
+    setText("weatherReadout", "Running simulation…");
+    const result = await apiFetch(`/simulate?mode=${mode}`, { method: "POST" });
+    if (result.networkError) {
+      setText("weatherReadout", `⚠️ ${result.message}`);
+      return;
+    }
+    if (!result.ok) {
+      setText("weatherReadout", `Error: ${result.data?.detail ?? `HTTP ${result.status}`}`);
+      return;
+    }
+    const data = result.data;
+    lastCones = data.cones_by_hotspot;
 
-  const w = data.weather;
-  setText(
-    "weatherReadout",
-    `Weather (${w.source}):\ntemp ${w.temperature_c}°C, humidity ${w.humidity_pct}%, wind ${w.wind_speed_kmh} km/h @ ${w.wind_direction_deg}°`
-  );
-  setText(
-    "riskReadout",
-    `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)`
-  );
-  setText(
-    "routeReadout",
-    `Baseline ETA (ignores fire): ${data.baseline_route.eta_min} min\nSafe ETA (re-costed around fire): ${data.safe_route.eta_min} min\nRe-routed: ${data.rerouted ? "yes" : "no"}\nBlocked road segments: ${data.blocked_edge_count}`
-  );
+    const w = data.weather;
+    setText(
+      "weatherReadout",
+      `Weather (${w.source}):\ntemp ${w.temperature_c}°C, humidity ${w.humidity_pct}%, wind ${w.wind_speed_kmh} km/h @ ${w.wind_direction_deg}°`
+    );
+    setText(
+      "riskReadout",
+      `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)`
+    );
+    setText(
+      "routeReadout",
+      `Baseline ETA (ignores fire): ${data.baseline_route.eta_min} min\nSafe ETA (re-costed around fire): ${data.safe_route.eta_min} min\nRe-routed: ${data.rerouted ? "yes" : "no"}\nBlocked road segments: ${data.blocked_edge_count}`
+    );
 
-  renderCones(data.cones_by_hotspot);
-  renderRoutes(data.baseline_route, data.safe_route);
-  highlightBlockedRoads(state.graph_edges, data.cones_by_hotspot);
+    renderCones(data.cones_by_hotspot);
+    renderRoutes(data.baseline_route, data.safe_route);
+    highlightBlockedRoads(state.graph_edges, data.cones_by_hotspot);
 
-  document.getElementById("btnTamper").disabled = false;
-  document.getElementById("btnApprove").disabled = false;
-  await loadAuditLog();
+    document.getElementById("btnTamper").disabled = false;
+    document.getElementById("btnApprove").disabled = false;
+    await loadAuditLog();
+  });
 }
 
 async function runTamperDemo() {
-  const res = await fetch(`${API}/tamper-demo`, { method: "POST" });
-  const data = await res.json();
-  setText(
-    "tamperReadout",
-    data.rejected
-      ? `✅ EXODUS rejected the tampered payload:\n"${data.reason}"`
-      : `⚠️ Unexpected: tampered payload was accepted.`
-  );
-  await loadAuditLog();
+  await withButtonsDisabled(["btnTamper"], async () => {
+    setText("tamperReadout", "Replaying tampered payload…");
+    const result = await apiFetch("/tamper-demo", { method: "POST" });
+    if (result.networkError) {
+      setText("tamperReadout", `⚠️ ${result.message}`);
+      return;
+    }
+    if (!result.ok) {
+      setText("tamperReadout", `Error: ${result.data?.detail ?? `HTTP ${result.status}`}`);
+      return;
+    }
+    setText(
+      "tamperReadout",
+      result.data.rejected
+        ? `✅ EXODUS rejected the tampered payload:\n"${result.data.reason}"`
+        : `⚠️ Unexpected: tampered payload was accepted.`
+    );
+    await loadAuditLog();
+  });
 }
 
 let sessionToken = null;
 let sessionUser = null;
 
 async function login() {
-  const username = document.getElementById("loginUsername").value.trim();
-  const password = document.getElementById("loginPassword").value;
-  const res = await fetch(`${API}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+  await withButtonsDisabled(["btnLogin"], async () => {
+    const username = document.getElementById("loginUsername").value.trim();
+    const password = document.getElementById("loginPassword").value;
+    const statusEl = document.getElementById("loginStatus");
+    statusEl.textContent = "Signing in…";
+
+    const result = await apiFetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (result.networkError) {
+      statusEl.textContent = `⚠️ ${result.message}`;
+      statusEl.classList.remove("signed-in");
+      return;
+    }
+    if (!result.ok) {
+      statusEl.textContent = `Login failed: ${result.data?.detail ?? `HTTP ${result.status}`}`;
+      statusEl.classList.remove("signed-in");
+      sessionToken = null;
+      sessionUser = null;
+      return;
+    }
+    sessionToken = result.data.token;
+    sessionUser = { username: result.data.username, role: result.data.role };
+    statusEl.textContent = `Signed in as ${result.data.username} (${result.data.role})`;
+    statusEl.classList.add("signed-in");
+    await loadAuditLog();
   });
-  const data = await res.json();
-  const statusEl = document.getElementById("loginStatus");
-  if (!res.ok) {
-    statusEl.textContent = `Login failed: ${data.detail}`;
-    statusEl.classList.remove("signed-in");
-    sessionToken = null;
-    sessionUser = null;
-    return;
-  }
-  sessionToken = data.token;
-  sessionUser = { username: data.username, role: data.role };
-  statusEl.textContent = `Signed in as ${data.username} (${data.role})`;
-  statusEl.classList.add("signed-in");
-  await loadAuditLog();
 }
 
 async function approveDispatch() {
@@ -193,18 +250,31 @@ async function approveDispatch() {
     setText("approveReadout", "❌ Log in first (see the box in the top-right corner).");
     return;
   }
-  const res = await fetch(`${API}/dispatch/approve`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${sessionToken}` },
+  await withButtonsDisabled(["btnApprove"], async () => {
+    setText("approveReadout", "Requesting approval…");
+    const result = await apiFetch("/dispatch/approve", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    if (result.networkError) {
+      setText("approveReadout", `⚠️ ${result.message}`);
+      return;
+    }
+    setText("approveReadout", result.ok ? result.data.message : `❌ Denied: ${result.data?.detail ?? `HTTP ${result.status}`}`);
+    await loadAuditLog();
   });
-  const data = await res.json();
-  setText("approveReadout", res.ok ? data.message : `❌ Denied: ${data.detail}`);
-  await loadAuditLog();
 }
 
 async function main() {
-  const res = await fetch(`${API}/state`);
-  state = await res.json();
+  const result = await apiFetch("/state");
+  if (!result.ok) {
+    const message = result.networkError
+      ? result.message
+      : `Server returned an error loading demo state (HTTP ${result.status}).`;
+    document.getElementById("banner").textContent = `⚠️ ${message}`;
+    return;
+  }
+  state = result.data;
 
   document.getElementById("banner").textContent = `${state.event_label} — ${state.event_note}`;
 
