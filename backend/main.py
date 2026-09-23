@@ -18,11 +18,12 @@ sys.path.insert(0, os.path.dirname(__file__))  # allow `import sentinel` etc. wh
 
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import audit
+import auth
 import exodus
 import graph_data
 import sentinel
@@ -41,9 +42,33 @@ _SHELTER_NODE = graph_data.nearest_node(_ROAD_GRAPH, _EVENT["shelter"]["lat"], _
 _LAST_SIM: dict = {}
 
 
-class DispatchApproval(BaseModel):
-    role: str
-    actor: str
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def _require_auth(authorization: str | None) -> dict:
+    """Extracts and verifies the Bearer token, returning {username, role}.
+    Raises 401 if missing/invalid/expired — role is derived from the signed
+    token here, never from anything the client claims in the request body."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
+    token = authorization.removeprefix("Bearer ")
+    payload = auth.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token.")
+    return payload
+
+
+@app.post("/api/login")
+def login(req: LoginRequest):
+    user = auth.verify_credentials(req.username, req.password)
+    if not user:
+        audit.record("login_failed", actor=req.username, details={})
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    token = auth.issue_token(user["username"], user["role"])
+    audit.record("login_succeeded", actor=user["username"], details={"role": user["role"]})
+    return {"token": token, "username": user["username"], "role": user["role"]}
 
 
 @app.get("/api/state")
@@ -135,16 +160,19 @@ def tamper_demo():
 
 
 @app.post("/api/dispatch/approve")
-def approve_dispatch(approval: DispatchApproval):
-    """Human-in-the-loop approval gate — Tier-1 audit finding #2. No autonomous
-    dispatch: only an 'authority' role can approve, and every attempt is logged."""
-    if approval.role != "authority":
-        audit.record("dispatch_denied", actor=approval.actor, details={"reason": "insufficient role", "role": approval.role})
+def approve_dispatch(authorization: str | None = Header(default=None)):
+    """Human-in-the-loop approval gate — Tier-1 audit finding #2. Role comes
+    from the server-verified session token (see _require_auth), not from
+    anything the client asserts — closes the earlier version of this demo
+    where any client could just claim role="authority" in the request body."""
+    identity = _require_auth(authorization)
+    if identity["role"] != "authority":
+        audit.record("dispatch_denied", actor=identity["username"], details={"reason": "insufficient role", "role": identity["role"]})
         raise HTTPException(status_code=403, detail="Only an authority-role user can approve dispatch.")
     if not _LAST_SIM:
         raise HTTPException(status_code=400, detail="Run /api/simulate first.")
 
-    audit.record("dispatch_approved", actor=approval.actor, details={
+    audit.record("dispatch_approved", actor=identity["username"], details={
         "safe_route_eta_min": _LAST_SIM["result"]["safe_route"]["eta_min"],
     })
     return {"approved": True, "message": "Dispatch approved. SMS alert simulated (see audit log) — no real SMS sent."}

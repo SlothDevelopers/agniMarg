@@ -20,29 +20,35 @@ Hardware/sensor track: dropped (budget, per your instruction). Full XGBoost/Conv
 | INTAKE | Real OSM road network (Overpass API) + real place/hospital data for Nainital, Uttarakhand. Live Open-Meteo weather (no API key). Seeded historical-style fire event (Pangot/Kilbary forest belt) by default — **or live NASA FIRMS hotspots if you set `AGNIMARG_FIRMS_MAP_KEY`** (see `backend/firms.py`), with automatic fallback to seeded data if the key is missing or the request fails. | PostGIS, Airflow/Celery ingestion, multi-source corroboration |
 | SENTINEL | FWI-style heuristic risk score (temp + humidity + wind — real live/scenario weather in, real number out) driving a real downwind threat-cone geometry (1h/3h/6h rings). HMAC-SHA256 signs every payload. | XGBoost ignition model, CNN-BiLSTM/ConvLSTM spread, MLflow versioning |
 | EXODUS | Real NetworkX Dijkstra routing over the real OSM graph. Verifies the HMAC signature before acting — rejects tampered payloads live (demoed, not just claimed). Dynamically re-costs/blocks edges inside the threat cone and reroutes. | OSRM/GraphHopper, multi-modal transit, OR-based vehicle pre-positioning |
-| INTERFACE | Single-page Leaflet dashboard: live map, cones, before/after routes, role selector (citizen/authority), human-approval dispatch gate, live audit log. | Real OAuth2/OIDC, real SMS (MSG91), Supabase/Postgres persistence — audit log is in-memory tonight |
+| INTERFACE | Single-page Leaflet dashboard: live map, cones, before/after routes, real username/password login with signed session tokens (`backend/auth.py`), human-approval dispatch gate, SQLite-persisted audit log. | Real OAuth2/OIDC (Google/etc.), real SMS (MSG91), Supabase/Postgres |
 
 ## Why the specific security controls built tonight
 
-Per the original audit doc's Tier-1 findings — HMAC signing (finding #1) and the human-approval gate (finding #2) are the two cheapest-to-build, highest-impact controls, so they're real and demoable, not just described. RBAC is a simple role flag (matches the Prototype Plan's own "RBAC: mock" guidance) rather than a full permissions system.
+Per the original audit doc's Tier-1 findings — HMAC signing (finding #1) and the human-approval gate (finding #2) are the two cheapest-to-build, highest-impact controls, so they're real and demoable, not just described. Role comes from a server-verified signed session token (`backend/auth.py`), not a client-asserted field — an earlier version of this build trusted whatever role the client claimed in the request body, which meant anyone could call the API directly and skip the login UI; that gap is now closed and covered by a regression test (`tests/test_api.py::test_dispatch_approve_rejects_forged_role_in_body`). Password hashing (SHA-256) and demo credentials are intentionally minimal/public — matches the Prototype Plan's own "Authentication: Yes (basic)" bar, not a production auth system.
 
 ## Repo layout (built)
 
 ```
 /backend
-  main.py         FastAPI app: /api/state, /api/weather, /api/simulate, /api/tamper-demo,
-                   /api/dispatch/approve, /api/audit-log — also serves /frontend as static files
-  graph_data.py    Loads the OSM graph + seeded event data
+  main.py         FastAPI app: /api/login, /api/state, /api/weather, /api/simulate,
+                   /api/tamper-demo, /api/dispatch/approve, /api/audit-log — also serves
+                   /frontend as static files
+  graph_data.py    Loads the OSM graph + seeded/live event data
   weather.py       Live Open-Meteo fetch (fails soft to a labeled fallback if offline)
+  firms.py         Optional live NASA FIRMS hotspot pull (AGNIMARG_FIRMS_MAP_KEY)
   sentinel.py      Risk score + threat-cone geometry + HMAC sign/verify
   exodus.py        Point-in-polygon re-costing, Dijkstra routing, signature verification
-  audit.py         In-memory audit log
-  data/            road_graph.json, places.json, hotspots.json — generated, committed for offline demo reliability
+  auth.py          Username/password login + signed session tokens (real, intentionally minimal)
+  audit.py         SQLite-persisted audit log
+  data/            road_graph.json, places.json, hotspots.json — generated, committed for
+                   offline demo reliability. audit.db is gitignored runtime state.
 /frontend
   index.html, style.css, app.js   Leaflet dashboard, no build step
 /scripts
   fetch_data.py     Regenerates road_graph.json/places.json from live Overpass API
   seed_hotspots.py  Regenerates hotspots.json (seeded fire event + fire-season scenario weather)
+/tests
+  33 pytest cases covering sentinel/exodus/auth/firms logic + the full HTTP API
 ```
 
 ## Run it
@@ -59,7 +65,7 @@ Open `http://127.0.0.1:8000/`. Click **"Run simulation (fire-season scenario)"**
 2. Click "Run simulation" — cones appear (live-computed geometry, not a static image), risk score and HMAC signature shown.
 3. Point out the green safe route bending around the red/orange cone vs. the gray baseline route that ignores it — this is the EXODUS differentiator the comparative-study doc calls out.
 4. Click "Tamper the signed payload & replay" — show EXODUS reject it. This directly answers Tier-1 audit finding #1 live, not on a slide.
-5. Switch role to Citizen, try "Approve dispatch" — denied. Switch to Authority, approve — succeeds, logged. Answers Tier-1 finding #2.
+5. Log in as `citizen1` / `demo-citizen-pass`, try "Approve dispatch" — denied (403). Log in as `authority1` / `demo-authority-pass`, approve — succeeds, logged under the real authenticated username. Answers Tier-1 finding #2.
 6. Show the audit log — answers Tier-1 finding #4.
 7. State plainly what's roadmap vs. built (the table above) — the Complete Software Tech Stack PDF and master blueprint are the "where this goes next" story, not tonight's claim.
 
@@ -67,5 +73,6 @@ Open `http://127.0.0.1:8000/`. Click **"Run simulation (fire-season scenario)"**
 
 - Fire hotspots are seeded by default, not a live FIRMS feed — set `AGNIMARG_FIRMS_MAP_KEY` (free, instant: https://firms.modaps.eosdis.nasa.gov/api/map_key/) to go live; falls back to seeded data automatically if unset or the request fails.
 - Risk score is an explicit FWI-style heuristic, not a trained ML model — same simplification the Prototype Plan doc itself recommends for the prototype stage.
-- Audit log is in-memory (resets on server restart) — fine for a live demo, not for production.
+- Audit log persists to SQLite (`backend/data/audit.db`, gitignored — runtime state, not build input) — fine for a demo/single-machine deployment, a real deployment would use managed Postgres.
+- Auth is a hardcoded 2-user demo table with SHA-256-hashed passwords and HMAC-signed session tokens — real, but intentionally minimal (no real OAuth/DB-backed users), matching the Prototype Plan's "basic" bar.
 - Routing graph covers one bounded region (Nainital) — proof of concept, not national coverage.
