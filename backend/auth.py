@@ -18,7 +18,9 @@ import json
 import os
 import time
 
-AUTH_SECRET = os.environ.get("AGNIMARG_AUTH_SECRET", "demo-only-not-for-production-auth-key").encode()
+_DEFAULT_AUTH_SECRET = "demo-only-not-for-production-auth-key"
+AUTH_SECRET = os.environ.get("AGNIMARG_AUTH_SECRET", _DEFAULT_AUTH_SECRET).encode()
+USING_DEFAULT_AUTH_SECRET = AUTH_SECRET == _DEFAULT_AUTH_SECRET.encode()
 TOKEN_TTL_SECONDS = 2 * 60 * 60  # 2 hours — long enough for one review session
 
 

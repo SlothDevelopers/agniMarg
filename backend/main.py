@@ -10,6 +10,7 @@ Run from the repo root:
     uvicorn backend.main:app --reload
 Then open http://127.0.0.1:8000/
 """
+import logging
 import os
 import sys
 import time
@@ -30,8 +31,19 @@ import sentinel
 import weather as weather_mod
 from ratelimit import RateLimitMiddleware
 
+logger = logging.getLogger("agnimarg")
+
 app = FastAPI(title="AGNIMARG Prototype API")
 app.add_middleware(RateLimitMiddleware)
+
+# Fine for this demo (falls back to a fixed, publicly-known key) — but a real
+# deployment must set these, or every payload signature / session token is
+# forgeable by anyone who reads this open-source repo. Warn loudly rather
+# than fail silently into an insecure default.
+if sentinel.USING_DEFAULT_SIGNING_KEY:
+    logger.warning("AGNIMARG_SIGNING_KEY is not set — using the public demo default. Do not use this outside a local demo.")
+if auth.USING_DEFAULT_AUTH_SECRET:
+    logger.warning("AGNIMARG_AUTH_SECRET is not set — using the public demo default. Do not use this outside a local demo.")
 
 _ROAD_GRAPH = graph_data.load_graph()
 _EVENT = graph_data.load_hotspot_event()
@@ -47,6 +59,19 @@ _LAST_SIM: dict = {}
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+@app.get("/api/health")
+def health():
+    """Basic liveness/readiness check — matches the master blueprint's Phase 0
+    DoD ('Flask returns {status: ok} on /'), adapted since our root path
+    serves the frontend instead."""
+    return {
+        "status": "ok",
+        "graph_nodes": _ROAD_GRAPH.number_of_nodes(),
+        "graph_edges": _ROAD_GRAPH.number_of_edges(),
+        "event_label": _EVENT["label"],
+    }
 
 
 def _require_auth(authorization: str | None) -> dict:
