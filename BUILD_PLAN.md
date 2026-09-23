@@ -17,7 +17,7 @@ Hardware/sensor track: dropped (budget, per your instruction). Full XGBoost/Conv
 
 | Part | Tonight's build | Explicitly deferred (roadmap only) |
 |---|---|---|
-| INTAKE | Real OSM road network (Overpass API) + real place/hospital data for Nainital, Uttarakhand. Live Open-Meteo weather (no API key). Seeded historical-style fire event (Pangot/Kilbary forest belt) — clearly labeled as seeded, not a live FIRMS feed. | Live NASA FIRMS feed (needs a free personal MAP_KEY you create — swap-in ready), PostGIS, Airflow/Celery ingestion, multi-source corroboration |
+| INTAKE | Real OSM road network (Overpass API) + real place/hospital data for Nainital, Uttarakhand. Live Open-Meteo weather (no API key). Seeded historical-style fire event (Pangot/Kilbary forest belt) by default — **or live NASA FIRMS hotspots if you set `AGNIMARG_FIRMS_MAP_KEY`** (see `backend/firms.py`), with automatic fallback to seeded data if the key is missing or the request fails. | PostGIS, Airflow/Celery ingestion, multi-source corroboration |
 | SENTINEL | FWI-style heuristic risk score (temp + humidity + wind — real live/scenario weather in, real number out) driving a real downwind threat-cone geometry (1h/3h/6h rings). HMAC-SHA256 signs every payload. | XGBoost ignition model, CNN-BiLSTM/ConvLSTM spread, MLflow versioning |
 | EXODUS | Real NetworkX Dijkstra routing over the real OSM graph. Verifies the HMAC signature before acting — rejects tampered payloads live (demoed, not just claimed). Dynamically re-costs/blocks edges inside the threat cone and reroutes. | OSRM/GraphHopper, multi-modal transit, OR-based vehicle pre-positioning |
 | INTERFACE | Single-page Leaflet dashboard: live map, cones, before/after routes, role selector (citizen/authority), human-approval dispatch gate, live audit log. | Real OAuth2/OIDC, real SMS (MSG91), Supabase/Postgres persistence — audit log is in-memory tonight |
@@ -65,7 +65,7 @@ Open `http://127.0.0.1:8000/`. Click **"Run simulation (fire-season scenario)"**
 
 ## Honest limitations (say these out loud in the review, don't let them be found)
 
-- Fire hotspots are seeded, not a live FIRMS feed (needs a free MAP_KEY you'd create yourself — architecture supports swapping it in without a rewrite).
+- Fire hotspots are seeded by default, not a live FIRMS feed — set `AGNIMARG_FIRMS_MAP_KEY` (free, instant: https://firms.modaps.eosdis.nasa.gov/api/map_key/) to go live; falls back to seeded data automatically if unset or the request fails.
 - Risk score is an explicit FWI-style heuristic, not a trained ML model — same simplification the Prototype Plan doc itself recommends for the prototype stage.
 - Audit log is in-memory (resets on server restart) — fine for a live demo, not for production.
 - Routing graph covers one bounded region (Nainital) — proof of concept, not national coverage.
