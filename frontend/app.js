@@ -119,6 +119,42 @@ async function apiFetch(path, options) {
   }
 }
 
+/** Offline/degraded-mode fallback — answers the original security audit's
+ * Tier-1 finding #3 ("no offline/degraded-mode fallback ... wildfires
+ * routinely take out power and cell towers, exactly when the system is
+ * needed most"), whose own recommended fix was "cached last-known-good
+ * state". Caches successful /api/state and /api/simulate responses in
+ * localStorage; if a later request fails due to a network error, falls back
+ * to the cache instead of just showing an error, with a clear "stale data"
+ * banner so it's never mistaken for live. */
+const CACHE_KEYS = { state: "agnimarg_cache_state", simulate: "agnimarg_cache_simulate" };
+
+function cacheSave(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, cachedAt: Date.now() }));
+  } catch {
+    // localStorage unavailable (private browsing, quota exceeded) — degraded
+    // mode just won't have a cache to fall back on; not fatal on its own.
+  }
+}
+
+function cacheLoad(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null; // {data, cachedAt} | null
+  } catch {
+    return null;
+  }
+}
+
+function formatCacheAge(cachedAt) {
+  const seconds = Math.round((Date.now() - cachedAt) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
 /** Disables the given button IDs for the duration of `fn`, restoring their
  * previous disabled state afterward (rather than force-enabling buttons that
  * were legitimately disabled for another reason, e.g. tamper/approve before
@@ -148,45 +184,61 @@ async function loadAuditLog() {
     .join("");
 }
 
+/** Renders a simulation result (fresh or from the offline cache) into the
+ * panel and map. `offlinePrefix` is prepended to the weather readout when
+ * this is cached data being shown because the live request failed. */
+function applySimulationResult(data, offlinePrefix = "") {
+  lastCones = data.cones_by_hotspot;
+
+  const w = data.weather;
+  setText(
+    "weatherReadout",
+    `${offlinePrefix}Weather (${w.source}):\ntemp ${w.temperature_c}°C, humidity ${w.humidity_pct}%, wind ${w.wind_speed_kmh} km/h @ ${w.wind_direction_deg}°`
+  );
+  const corroborationNote =
+    data.unconfirmed_hotspots.length > 0
+      ? `\n⚠️ ${data.unconfirmed_hotspots.length} report(s) excluded — no corroborating second source (single-point reports aren't trusted alone).`
+      : `\nAll ${data.confirmed_hotspot_count} hotspot report(s) corroborated by a nearby second source.`;
+  setText(
+    "riskReadout",
+    `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)${corroborationNote}`
+  );
+  setText(
+    "routeReadout",
+    `Baseline ETA (ignores fire): ${data.baseline_route.eta_min} min\nSafe ETA (re-costed around fire): ${data.safe_route.eta_min} min\nRe-routed: ${data.rerouted ? "yes" : "no"}\nBlocked road segments: ${data.blocked_edge_count}`
+  );
+
+  renderCones(data.cones_by_hotspot);
+  renderRoutes(data.baseline_route, data.safe_route);
+  highlightBlockedRoads(state.graph_edges, data.cones_by_hotspot);
+
+  document.getElementById("btnTamper").disabled = false;
+  document.getElementById("btnApprove").disabled = false;
+}
+
 async function runSimulation(mode) {
   await withButtonsDisabled(["btnSimScenario", "btnSimLive"], async () => {
     setText("weatherReadout", "Running simulation…");
     const result = await apiFetch(`/simulate?mode=${mode}`, { method: "POST" });
+
     if (result.networkError) {
-      setText("weatherReadout", `⚠️ ${result.message}`);
+      const cached = cacheLoad(CACHE_KEYS.simulate);
+      if (cached) {
+        applySimulationResult(cached.data, `⚠️ OFFLINE — server unreachable, showing cached simulation from ${formatCacheAge(cached.cachedAt)} (mode: ${cached.data.mode}).\n\n`);
+      } else {
+        setText("weatherReadout", `⚠️ ${result.message}\n(No cached simulation available to fall back to yet — run one successfully first.)`);
+      }
       return;
     }
     if (!result.ok) {
       setText("weatherReadout", `Error: ${result.data?.detail ?? `HTTP ${result.status}`}`);
       return;
     }
+
     const data = result.data;
-    lastCones = data.cones_by_hotspot;
+    applySimulationResult(data);
+    cacheSave(CACHE_KEYS.simulate, { ...data, mode });
 
-    const w = data.weather;
-    setText(
-      "weatherReadout",
-      `Weather (${w.source}):\ntemp ${w.temperature_c}°C, humidity ${w.humidity_pct}%, wind ${w.wind_speed_kmh} km/h @ ${w.wind_direction_deg}°`
-    );
-    const corroborationNote =
-      data.unconfirmed_hotspots.length > 0
-        ? `\n⚠️ ${data.unconfirmed_hotspots.length} report(s) excluded — no corroborating second source (single-point reports aren't trusted alone).`
-        : `\nAll ${data.confirmed_hotspot_count} hotspot report(s) corroborated by a nearby second source.`;
-    setText(
-      "riskReadout",
-      `Risk score: ${data.risk_score} (0-1 heuristic, FWI-style)\nThreat-cone signature: ${data.signature.slice(0, 24)}… (HMAC-SHA256, verified by EXODUS)${corroborationNote}`
-    );
-    setText(
-      "routeReadout",
-      `Baseline ETA (ignores fire): ${data.baseline_route.eta_min} min\nSafe ETA (re-costed around fire): ${data.safe_route.eta_min} min\nRe-routed: ${data.rerouted ? "yes" : "no"}\nBlocked road segments: ${data.blocked_edge_count}`
-    );
-
-    renderCones(data.cones_by_hotspot);
-    renderRoutes(data.baseline_route, data.safe_route);
-    highlightBlockedRoads(state.graph_edges, data.cones_by_hotspot);
-
-    document.getElementById("btnTamper").disabled = false;
-    document.getElementById("btnApprove").disabled = false;
     await loadAuditLog();
   });
 }
@@ -269,18 +321,10 @@ async function approveDispatch() {
   });
 }
 
-async function main() {
-  const result = await apiFetch("/state");
-  if (!result.ok) {
-    const message = result.networkError
-      ? result.message
-      : `Server returned an error loading demo state (HTTP ${result.status}).`;
-    document.getElementById("banner").textContent = `⚠️ ${message}`;
-    return;
-  }
-  state = result.data;
+function applyState(stateData, offlinePrefix = "") {
+  state = stateData;
 
-  document.getElementById("banner").textContent = `${state.event_label} — ${state.event_note}`;
+  document.getElementById("banner").textContent = `${offlinePrefix}${state.event_label} — ${state.event_note}`;
 
   initMap(state.graph_bbox);
   renderRoads(state.graph_edges);
@@ -292,6 +336,26 @@ async function main() {
   shelterMarker = L.marker([state.shelter.lat, state.shelter.lon])
     .bindPopup(`Shelter: ${state.shelter.name}`)
     .addTo(map);
+}
+
+async function main() {
+  const result = await apiFetch("/state");
+
+  if (!result.ok) {
+    const cached = cacheLoad(CACHE_KEYS.state);
+    if (cached) {
+      applyState(cached.data, `⚠️ OFFLINE — server unreachable, showing cached map data from ${formatCacheAge(cached.cachedAt)}. `);
+    } else {
+      const message = result.networkError
+        ? result.message
+        : `Server returned an error loading demo state (HTTP ${result.status}).`;
+      document.getElementById("banner").textContent = `⚠️ ${message} (No cached data available to fall back to yet.)`;
+      return; // no state at all — nothing to wire up buttons against
+    }
+  } else {
+    applyState(result.data);
+    cacheSave(CACHE_KEYS.state, result.data);
+  }
 
   document.getElementById("btnSimScenario").addEventListener("click", () => runSimulation("scenario"));
   document.getElementById("btnSimLive").addEventListener("click", () => runSimulation("live"));
