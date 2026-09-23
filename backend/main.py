@@ -28,8 +28,10 @@ import exodus
 import graph_data
 import sentinel
 import weather as weather_mod
+from ratelimit import RateLimitMiddleware
 
 app = FastAPI(title="AGNIMARG Prototype API")
+app.add_middleware(RateLimitMiddleware)
 
 _ROAD_GRAPH = graph_data.load_graph()
 _EVENT = graph_data.load_hotspot_event()
