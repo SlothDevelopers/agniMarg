@@ -4,3 +4,5 @@ __pycache__/
 venv/
 node_modules/
 *.log
+.pytest_cache/
+backend/data/audit.db
