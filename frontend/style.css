@@ -40,11 +40,16 @@ header {
   border-radius: 10px;
   margin-left: 8px;
 }
-.role-switch { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
-.role-switch select {
+.login-box { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+.login-box input {
   background: var(--panel-alt); color: var(--text-hi); border: 1px solid var(--border);
-  padding: 5px 8px; border-radius: 4px;
+  padding: 5px 8px; border-radius: 4px; font-size: 0.8rem;
 }
+.login-box button {
+  width: auto; padding: 5px 10px; font-size: 0.8rem;
+}
+.login-status { color: var(--text-muted); margin-left: 4px; }
+.login-status.signed-in { color: var(--safe); }
 .banner {
   background: #3f2d12; color: #ffb454; font-size: 0.8rem;
   padding: 6px 20px; border-bottom: 1px solid var(--border);

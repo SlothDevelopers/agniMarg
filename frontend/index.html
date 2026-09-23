@@ -11,12 +11,11 @@
 
 <header>
   <div class="brand">AGNI<span>MARG</span> <span class="tag">software-only prototype</span></div>
-  <div class="role-switch">
-    <label for="role">Signed in as</label>
-    <select id="role">
-      <option value="citizen">Citizen</option>
-      <option value="authority">Authority (can approve dispatch)</option>
-    </select>
+  <div id="loginBox" class="login-box">
+    <input id="loginUsername" type="text" placeholder="username (try authority1)" size="20" />
+    <input id="loginPassword" type="password" placeholder="password (demo-authority-pass)" size="22" />
+    <button id="btnLogin">Log in</button>
+    <span id="loginStatus" class="login-status">Not signed in</span>
   </div>
 </header>
 
@@ -61,7 +60,7 @@
       <div class="row">
         <button id="btnApprove" disabled>Approve dispatch</button>
       </div>
-      <div id="approveReadout" class="readout">Only an "authority" role may approve.</div>
+      <div id="approveReadout" class="readout">Log in as an "authority" user to approve. Demo credentials: authority1 / demo-authority-pass, or citizen1 / demo-citizen-pass (citizen will be denied — that's the point).</div>
     </section>
 
     <section>

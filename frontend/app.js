@@ -161,12 +161,41 @@ async function runTamperDemo() {
   await loadAuditLog();
 }
 
-async function approveDispatch() {
-  const role = document.getElementById("role").value;
-  const res = await fetch(`${API}/dispatch/approve`, {
+let sessionToken = null;
+let sessionUser = null;
+
+async function login() {
+  const username = document.getElementById("loginUsername").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const res = await fetch(`${API}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role, actor: role === "authority" ? "demo-authority-user" : "demo-citizen-user" }),
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await res.json();
+  const statusEl = document.getElementById("loginStatus");
+  if (!res.ok) {
+    statusEl.textContent = `Login failed: ${data.detail}`;
+    statusEl.classList.remove("signed-in");
+    sessionToken = null;
+    sessionUser = null;
+    return;
+  }
+  sessionToken = data.token;
+  sessionUser = { username: data.username, role: data.role };
+  statusEl.textContent = `Signed in as ${data.username} (${data.role})`;
+  statusEl.classList.add("signed-in");
+  await loadAuditLog();
+}
+
+async function approveDispatch() {
+  if (!sessionToken) {
+    setText("approveReadout", "❌ Log in first (see the box in the top-right corner).");
+    return;
+  }
+  const res = await fetch(`${API}/dispatch/approve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}` },
   });
   const data = await res.json();
   setText("approveReadout", res.ok ? data.message : `❌ Denied: ${data.detail}`);
@@ -194,6 +223,7 @@ async function main() {
   document.getElementById("btnSimLive").addEventListener("click", () => runSimulation("live"));
   document.getElementById("btnTamper").addEventListener("click", runTamperDemo);
   document.getElementById("btnApprove").addEventListener("click", approveDispatch);
+  document.getElementById("btnLogin").addEventListener("click", login);
 
   await loadAuditLog();
 }
