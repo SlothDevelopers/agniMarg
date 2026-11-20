@@ -1,0 +1,67 @@
+# Region configuration: Uttarakhand (region 1). One file per region; code never hard-codes a region.
+region:
+  name: uttarakhand
+  boundary_file: data/raw/geoboundaries_ind_adm1/geoBoundaries-IND-ADM1.geojson
+  boundary_iso: IN-UT            # value of the shapeISO field for this state
+
+grid:
+  crs: EPSG:32644                # WGS 84 / UTM zone 44N: metres, so cells are true 1 km squares
+  cell_size_m: 1000
+
+land_cover:
+  source_dir: data/raw/esa_worldcover_2021_v200
+  # ESA WorldCover class codes
+  classes:
+    tree: 10
+    shrub: 20
+    grass: 30
+    crop: 40
+    built: 50
+  # A cell is modelled if at least this share of it is tree cover + shrubland (docs/MODEL.md, M1).
+  forest_min_fraction: 0.30
+
+terrain:
+  source_dir: data/raw/copernicus_dem_glo30
+
+static:
+  population_file: data/raw/worldpop_2020_constrained/ind_ppp_2020_constrained.tif
+  osm_file: data/raw/osm_geofabrik/central-zone-latest_downloaded-2026-11-09.osm.pbf
+  # OpenStreetMap "highway" values, grouped
+  road_classes:
+    motorable: [motorway, trunk, primary, secondary, tertiary, motorway_link, trunk_link,
+                primary_link, secondary_link, tertiary_link, unclassified, residential,
+                living_street, service, road]
+    path: [track, path, footway, bridleway, steps, cycleway, pedestrian]
+  place_types: [city, town, village, hamlet]
+
+weather:
+  source_dir: data/raw/era5_land      # hourly ERA5-Land, one file per month
+
+labels:
+  # FIRMS archive files (quality-checked "standard" processing). NRT files are not used for training.
+  sources:
+    snpp: dataset/fire_archive_SV-C2_811649.csv      # VIIRS on S-NPP, 2016-09 onward
+    noaa20: dataset/fire_archive_J1V-C2_811647.csv   # VIIRS on NOAA-20, 2018-04 onward
+  # A cell-day is a fire if any of these satellites detected one. Labels start when all of them
+  # are operating, so the chance of seeing a fire is the same in every year.
+  label_sensors: [snpp, noaa20]
+  label_start_date: "2018-04-01"
+  utc_offset_minutes: 330        # India Standard Time; detections are assigned to the local date
+  keep_type: 0                   # FIRMS type 0 = presumed vegetation fire
+  drop_confidence: [l]           # drop low-confidence detections
+  exclude_land_cover: [40, 50]   # drop detections whose centre falls on cropland or built-up land
+
+table:
+  season_months: [11, 12, 1, 2, 3, 4, 5, 6]   # fire season November to June
+  season_end_month: 6                          # a season is named by the year it ends
+  splits:                                      # docs/MODEL.md, M5
+    train_last_season: 2022
+    valid_seasons: [2023]
+    test_first_season: 2024
+  sample_rate_train: 0.02     # share of no-fire rows kept for training (fire rows are all kept)
+  sample_rate_eval: 0.10      # share kept for validation and test, for steadier scores
+  neighbour_radius_cells: 2   # nbr_fire_recent counts fires within 2 cells (a 5 x 5 km square)
+  recent_fire_days: 7
+
+output_dir: data/processed/uttarakhand
+seed: 20261116
